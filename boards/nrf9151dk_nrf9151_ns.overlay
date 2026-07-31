@@ -1,0 +1,11 @@
+/*
+ * M5Stack ENV III (SHT30 + QMP6988) connected to the I2C2 bus
+ * (Arduino header, P0.30 = SDA, P0.31 = SCL).
+ */
+
+&i2c2 {
+	sht30: sht30@44 {
+		compatible = "sensirion,sht3xd";
+		reg = <0x44>;
+	};
+};

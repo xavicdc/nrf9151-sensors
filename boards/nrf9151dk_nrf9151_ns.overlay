@@ -4,6 +4,7 @@
  */
 
 &i2c2 {
+	clock-frequency = <100000>;
 	sht30: sht30@44 {
 		compatible = "sensirion,sht3xd";
 		reg = <0x44>;

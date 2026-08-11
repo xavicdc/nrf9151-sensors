@@ -4,3 +4,6 @@ test_build/
 
 # Zephyr / west build output
 build/
+
+# IDE local config
+.vscode/

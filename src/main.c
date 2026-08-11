@@ -4,8 +4,10 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/printk.h>
+#include <string.h>
 
 #include "qmp6988.h"
+#include "mqtt_app.h"
 
 #define I2C_NODE DT_NODELABEL(i2c2)
 #define SHT30_NODE DT_NODELABEL(sht30)
@@ -92,6 +94,28 @@ static void print_sensor_value(const char *label, struct sensor_value *val)
 	printk("%s %d.%06d", label, val->val1, val->val2);
 }
 
+static void sht30_probe(const struct device *i2c_dev)
+{
+	uint8_t soft_reset[2] = { 0x30, 0xA2 };
+	uint8_t status_cmd[2] = { 0xF3, 0x2D };
+	uint8_t rx[3];
+
+	for (int addr = 0x44; addr <= 0x45; addr++) {
+		if (i2c_write(i2c_dev, soft_reset, sizeof(soft_reset), addr) != 0) {
+			printk("SHT30 probe @0x%02x: no ACK\n", addr);
+			continue;
+		}
+		printk("SHT30 probe @0x%02x: ACK after soft reset\n", addr);
+		k_msleep(20);
+		if (i2c_write_read(i2c_dev, addr, status_cmd, sizeof(status_cmd),
+				   rx, sizeof(rx)) == 0) {
+			printk("  status reg: %02x %02x %02x\n", rx[0], rx[1], rx[2]);
+		} else {
+			printk("  status read FAIL\n");
+		}
+	}
+}
+
 static void i2c_scan(const struct device *i2c_dev)
 {
 	uint8_t addr;
@@ -117,7 +141,9 @@ int main(void)
 	const struct device *i2c_dev = DEVICE_DT_GET(I2C_NODE);
 	const struct device *sht30 = DEVICE_DT_GET(SHT30_NODE);
 
-	printk("nRF9151-SMA-DK sensors + LED/button control\n");
+	printk("nRF9151-SMA-DK sensors + LED/button control + MQTT\n");
+
+	mqtt_app_init();
 
 	for (int i = 0; i < NUM_LEDS; i++) {
 		if (!device_is_ready(leds[i].port) || !device_is_ready(buttons[i].port)) {
@@ -149,6 +175,8 @@ int main(void)
 
 	i2c_scan(i2c_dev);
 
+	sht30_probe(i2c_dev);
+
 	if (!device_is_ready(sht30)) {
 		printk("Warning: SHT30 not ready - humidity unavailable\n");
 	}
@@ -162,8 +190,12 @@ int main(void)
 	while (1) {
 		struct sensor_value temp, hum;
 		int32_t pressure_pa, temp_mdeg;
+		bool sht30_ok = false;
+		bool qmp_ok = false;
+		char payload[160];
 
 		if (qmp6988_read(i2c_dev, &pressure_pa, &temp_mdeg) == 0) {
+			qmp_ok = true;
 			printk("QMP6988 temp=%d.%03d C  pressure=%d.%02d hPa\n",
 			       temp_mdeg / 1000, abs(temp_mdeg) % 1000,
 			       pressure_pa / 100, abs(pressure_pa) % 100);
@@ -175,6 +207,7 @@ int main(void)
 		    sensor_sample_fetch(sht30) == 0 &&
 		    sensor_channel_get(sht30, SENSOR_CHAN_AMBIENT_TEMP, &temp) == 0 &&
 		    sensor_channel_get(sht30, SENSOR_CHAN_HUMIDITY, &hum) == 0) {
+			sht30_ok = true;
 			printk("SHT30 temp=");
 			print_sensor_value("", &temp);
 			printk(" C  hum=");
@@ -182,6 +215,25 @@ int main(void)
 			printk(" %%\n");
 		} else {
 			printk("SHT30 read error\n");
+		}
+
+		if (qmp_ok) {
+			int n = snprintk(payload, sizeof(payload),
+				 "{\"temperature\":%d.%03d,\"pressure\":%d.%02d",
+				 temp_mdeg / 1000, abs(temp_mdeg) % 1000,
+				 pressure_pa / 100, abs(pressure_pa) % 100);
+
+			if (sht30_ok) {
+				snprintk(payload + n, sizeof(payload) - n,
+					 ",\"humidity\":%d.%06d", hum.val1, hum.val2);
+			} else {
+				snprintk(payload + n, sizeof(payload) - n, ",\"humidity\":null");
+			}
+
+			n = strlen(payload);
+			snprintk(payload + n, sizeof(payload) - n, "}");
+
+			mqtt_app_publish(payload);
 		}
 
 		k_sleep(K_SECONDS(2));

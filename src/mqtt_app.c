@@ -113,6 +113,36 @@ int mqtt_app_start(void)
 		return 0;
 	}
 
+	printk("--- Modem setup ---\n");
+
+	for (int i = 0; i < 10; i++) {
+		if (nrf_modem_at_cmd(NULL, 0, "AT") == 0) {
+			printk("Modem AT ready\n");
+			break;
+		}
+		k_sleep(K_SECONDS(1));
+	}
+
+	err = lte_lc_system_mode_set(IS_ENABLED(MQTT_USE_NTN_NBIOT)
+				     ? LTE_LC_SYSTEM_MODE_NTN_NBIOT
+				     : LTE_LC_SYSTEM_MODE_LTEM_GPS,
+				     LTE_LC_SYSTEM_MODE_PREFER_AUTO);
+	printk("system_mode_set = %d\n", err);
+
+	enum lte_lc_system_mode cur_mode;
+	enum lte_lc_system_mode_preference cur_pref;
+
+	if (lte_lc_system_mode_get(&cur_mode, &cur_pref) == 0) {
+		printk("system mode now: %d\n", cur_mode);
+	}
+
+	err = nrf_modem_at_cmd(NULL, 0, "AT+CGDCONT=1,\"IP\",\"%s\"", LTE_APN);
+	if (err) {
+		printk("APN set failed: %d\n", err);
+	} else {
+		printk("APN set: %s\n", LTE_APN);
+	}
+
 	lte_lc_register_handler(lte_handler);
 	err = lte_lc_connect_async(NULL);
 	if (err) {
@@ -253,7 +283,18 @@ static void mqtt_thread(void *a, void *b, void *c)
 		int err;
 
 		while (!network_up) {
+			enum lte_lc_nw_reg_status rs;
+			enum lte_lc_lte_mode lm;
+
 			mqtt_app_start();
+
+			if (lte_lc_nw_reg_status_get(&rs) == 0) {
+				printk("reg status: %d\n", rs);
+			}
+			if (lte_lc_lte_mode_get(&lm) == 0) {
+				printk("lte mode: %d\n", lm);
+			}
+
 			k_sem_take(&net_ready_sem, K_SECONDS(5));
 		}
 
@@ -352,6 +393,7 @@ static void mqtt_thread(void *a, void *b, void *c)
 					printk("Publish failed: %d\n", err);
 				} else {
 					printk("Published: %s\n", item.data);
+					last_live_ms = k_uptime_get();
 				}
 			}
 		}
@@ -374,7 +416,7 @@ int mqtt_app_init(void)
 		return err;
 	}
 
-	return mqtt_app_start();
+	return 0;
 }
 
 int mqtt_app_publish(const char *json)

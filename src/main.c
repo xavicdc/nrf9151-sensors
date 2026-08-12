@@ -8,6 +8,8 @@
 
 #include "qmp6988.h"
 #include "mqtt_app.h"
+#include "gnss.h"
+#include "net_config.h"
 
 #define I2C_NODE DT_NODELABEL(i2c2)
 #define SHT30_NODE DT_NODELABEL(sht30)
@@ -144,6 +146,7 @@ int main(void)
 	printk("nRF9151-SMA-DK sensors + LED/button control + MQTT\n");
 
 	mqtt_app_init();
+	gnss_init();
 
 	for (int i = 0; i < NUM_LEDS; i++) {
 		if (!device_is_ready(leds[i].port) || !device_is_ready(buttons[i].port)) {
@@ -194,6 +197,8 @@ int main(void)
 		bool qmp_ok = false;
 		char payload[160];
 
+		gnss_init();
+
 		if (qmp6988_read(i2c_dev, &pressure_pa, &temp_mdeg) == 0) {
 			qmp_ok = true;
 			printk("QMP6988 temp=%d.%03d C  pressure=%d.%02d hPa\n",
@@ -223,20 +228,55 @@ int main(void)
 				 temp_mdeg / 1000, abs(temp_mdeg) % 1000,
 				 pressure_pa / 100, abs(pressure_pa) % 100);
 
+			double lat, lon;
+			float acc;
+
+			if (gnss_position_get(&lat, &lon, &acc)) {
+				int lat_deg = (int)lat;
+				int lat_frac = (int)((lat - lat_deg) * 1000000.0);
+				int lon_deg = (int)lon;
+				int lon_frac = (int)((lon - lon_deg) * 1000000.0);
+
+				if (lat_frac < 0) {
+					lat_frac = -lat_frac;
+				}
+				if (lon_frac < 0) {
+					lon_frac = -lon_frac;
+				}
+
+				n = strlen(payload);
+				snprintk(payload + n, sizeof(payload) - n,
+					 ",\"latitude\":%d.%06d,\"longitude\":%d.%06d",
+					 lat_deg, lat_frac, lon_deg, lon_frac);
+			}
+
 			if (sht30_ok) {
+				n = strlen(payload);
 				snprintk(payload + n, sizeof(payload) - n,
 					 ",\"humidity\":%d.%06d", hum.val1, hum.val2);
 			} else {
+				n = strlen(payload);
 				snprintk(payload + n, sizeof(payload) - n, ",\"humidity\":null");
 			}
 
 			n = strlen(payload);
+			snprintk(payload + n, sizeof(payload) - n,
+				 ",\"buttons\":[%d,%d,%d,%d],\"leds\":[%d,%d,%d,%d]",
+				 gpio_pin_get_dt(&buttons[0]), gpio_pin_get_dt(&buttons[1]),
+				 gpio_pin_get_dt(&buttons[2]), gpio_pin_get_dt(&buttons[3]),
+				 led_enabled[0] ? 1 : 0, led_enabled[1] ? 1 : 0,
+				 led_enabled[2] ? 1 : 0, led_enabled[3] ? 1 : 0);
+
+			n = strlen(payload);
 			snprintk(payload + n, sizeof(payload) - n, "}");
 
+			printk("PAYLOAD: %s\n", payload);
 			mqtt_app_publish(payload);
 		}
 
-		k_sleep(K_SECONDS(2));
+		k_sleep(K_SECONDS(IS_ENABLED(MQTT_USE_NTN_NBIOT)
+				     ? MQTT_PUBLISH_INTERVAL_SECONDS_NTN
+				     : MQTT_PUBLISH_INTERVAL_SECONDS));
 	}
 
 	return 0;

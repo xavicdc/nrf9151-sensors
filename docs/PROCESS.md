@@ -204,3 +204,36 @@ Set-Content src/ca_cert.h $sb -Encoding ascii
 | `prj.conf` | Kconfig: sensors, mòdem, xarxa, MQTT/TLS |
 | `platformio.ini` | Plataforma `nordicnrf91`, paths NCS, `build_dir` curt |
 | `boards/nrf9151dk_nrf9151_ns.overlay` | Node SHT30 + `clock-frequency = 100000` al I2C2 |
+
+---
+
+## 12. GNSS, pla de dades i NTN
+
+### 12.1 GNSS / GPS
+
+Es va activar el mode del sistema **LTE-M + GPS** (`LTE_LC_SYSTEM_MODE_LTEM_GPS`, `AT%XSYSTEMMODE=1,0,1`) i el receptor GNSS del mòdem (`nrf_modem_gnss_*`). Punts clau:
+
+- `nrf_modem_gnss_event_handler_set()` + `nrf_modem_gnss_start()`.
+- Al event `NRF_MODEM_GNSS_EVT_PVT` es llegeix `struct nrf_modem_gnss_pvt_data_frame`; només es considera fix vàlid si `pvt.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID`.
+- El fix necessita **cel obert**; a l'interior només apareix `GNSS: searching satellites...`.
+- `gnss_init()` ha de córrer DESPRÉS que el mode del sistema inclogui GPS (el thread MQTT el fixa); per això `main` el crida cada cicle fins que arrenca (idempotent).
+
+### 12.2 Pla de dades (terrestre 6.5 MB/mes)
+
+Cada publicació costa ~160 B (payload + MQTT/TCP/IP/TLS) + senyalització LTE-M. La cadència inicial de **2 s** implicava ~43.200 missatges/mes ≈ **6.5 MB/mes** — al límit del pla. L'evidència (rebuig **EMM cause 15** "no suitable cells in tracking area") apunta que **el pla es va esgotar**, no a un problema del mòdem.
+
+Mesures preses:
+- Cadència de publicació baixada a **60 s** (`MQTT_PUBLISH_INTERVAL_SECONDS`) ≈ 230 KB/mes.
+- `CONFIG_MQTT_KEEPALIVE` pujat a **120 s** i supressió de PING just després d'un PUBLISH (els PUBLISH ja compten com a activitat).
+
+### 12.3 NTN NB-IoT (satèl·lit GEO/LEO) — preparat
+
+La SIM té un pla satel·lital de **50 KB/mes**. S'ha preparat el codi per a NTN (`MQTT_USE_NTN_NBIOT` + cadència `MQTT_PUBLISH_INTERVAL_SECONDS_NTN` = 3 h ≈ 38 KB/mes), però:
+
+- ⚠️ NTN requereix el **firmware de mòdem `mfw_nrf9151-ntn`**, un firmware DIFERENT del terrestre (no es poden usar tots dos alhora). No està disponible al sistema; cal obtenir-lo i flashejar-lo.
+- Requereix que el pla satel·lital estigui actiu i cobertura de satèl·lit.
+- Es deixa `MQTT_USE_NTN_NBIOT=0` (terrestre) fins que calgui canviar.
+
+### 12.4 Aprenentatge de diagnòstic
+
+En aquesta versió del NCS, els enums de mode són: `LTE_LC_LTE_MODE_LTEM = 7` i `LTE_LC_LTE_MODE_NBIOT = 9` (no 1 i 2). Interpretar-los amb els valors d'una altra versió va portar a una diagnosi errònia (pensar que el mòdem estava en "multimode") quan en realitat estava correctament en LTE-M i el rebuig era de la xarxa.

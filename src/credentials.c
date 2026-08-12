@@ -4,10 +4,8 @@
 
 #include <modem/modem_key_mgmt.h>
 #include <modem/nrf_modem_lib.h>
-#include <nrf_modem_at.h>
 
 #include "net_config.h"
-#include "mqtt_app.h"
 
 LOG_MODULE_REGISTER(credentials, LOG_LEVEL_INF);
 
@@ -26,13 +24,6 @@ static void credentials_provision(void)
 	} else {
 		printk("CA cert provisioned\n");
 	}
-
-	err = nrf_modem_at_cmd(NULL, 0, "AT+CGDCONT=1,\"IP\",\"%s\"", LTE_APN);
-	if (err) {
-		printk("Failed to set APN: %d\n", err);
-	} else {
-		printk("APN set: %s\n", LTE_APN);
-	}
 }
 
 static void on_modem_lib_init(int ret, void *ctx)
@@ -46,7 +37,6 @@ static void on_modem_lib_init(int ret, void *ctx)
 	}
 
 	credentials_provision();
-	mqtt_app_start();
 }
 
 NRF_MODEM_LIB_ON_INIT(credentials_hook, on_modem_lib_init, NULL);

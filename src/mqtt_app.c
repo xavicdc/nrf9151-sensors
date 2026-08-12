@@ -125,6 +125,8 @@ int mqtt_app_start(void)
 
 	err = lte_lc_system_mode_set(IS_ENABLED(MQTT_USE_NTN_NBIOT)
 				     ? LTE_LC_SYSTEM_MODE_NTN_NBIOT
+				     : IS_ENABLED(MQTT_USE_GNSS_ONLY)
+				     ? LTE_LC_SYSTEM_MODE_GPS
 				     : LTE_LC_SYSTEM_MODE_LTEM_GPS,
 				     LTE_LC_SYSTEM_MODE_PREFER_AUTO);
 	printk("system_mode_set = %d\n", err);
@@ -283,18 +285,7 @@ static void mqtt_thread(void *a, void *b, void *c)
 		int err;
 
 		while (!network_up) {
-			enum lte_lc_nw_reg_status rs;
-			enum lte_lc_lte_mode lm;
-
 			mqtt_app_start();
-
-			if (lte_lc_nw_reg_status_get(&rs) == 0) {
-				printk("reg status: %d\n", rs);
-			}
-			if (lte_lc_lte_mode_get(&lm) == 0) {
-				printk("lte mode: %d\n", lm);
-			}
-
 			k_sem_take(&net_ready_sem, K_SECONDS(5));
 		}
 

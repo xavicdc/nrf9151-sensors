@@ -20,6 +20,11 @@
 #define MQTT_USE_NTN_NBIOT 0
 #define MQTT_PUBLISH_INTERVAL_SECONDS_NTN 10800
 
+/* Mode GNSS-únic (prova): el mòdem dedica tot l'RF al GNSS i no fa LTE.
+ * Ajuda a obtenir fix quan hi ha pocs satèl·lits / interferència LTE.
+ * Deixar a 0 per al funcionament normal (LTE-M+GPS). */
+#define MQTT_USE_GNSS_ONLY 1
+
 #define MQTT_BROKER_USERNAME ""
 #define MQTT_BROKER_PASSWORD ""
 

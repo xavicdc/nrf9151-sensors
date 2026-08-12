@@ -229,9 +229,9 @@ int main(void)
 				 pressure_pa / 100, abs(pressure_pa) % 100);
 
 			double lat, lon;
-			float acc;
+			float alt, acc;
 
-			if (gnss_position_get(&lat, &lon, &acc)) {
+			if (gnss_position_get(&lat, &lon, &alt, &acc)) {
 				int lat_deg = (int)lat;
 				int lat_frac = (int)((lat - lat_deg) * 1000000.0);
 				int lon_deg = (int)lon;
@@ -244,10 +244,14 @@ int main(void)
 					lon_frac = -lon_frac;
 				}
 
+				printk("GPS fix: %d.%06d, %d.%06d (alt %d m, acc %d m)\n",
+				       lat_deg, lat_frac, lon_deg, lon_frac,
+				       (int)alt, (int)acc);
+
 				n = strlen(payload);
 				snprintk(payload + n, sizeof(payload) - n,
-					 ",\"latitude\":%d.%06d,\"longitude\":%d.%06d",
-					 lat_deg, lat_frac, lon_deg, lon_frac);
+					 ",\"latitude\":%d.%06d,\"longitude\":%d.%06d,\"altitude\":%d",
+					 lat_deg, lat_frac, lon_deg, lon_frac, (int)alt);
 			}
 
 			if (sht30_ok) {

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 int gnss_init(void);
-bool gnss_position_get(double *latitude, double *longitude, float *accuracy);
+bool gnss_position_get(double *latitude, double *longitude, float *altitude,
+		       float *accuracy);
 
 #endif /* GNSS_H */

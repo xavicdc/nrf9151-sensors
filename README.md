@@ -122,9 +122,10 @@ La SIM té un pla **terrestre de 6.5 MB/mes** i un **satel·lital (NTN) de 50 KB
 ## GNSS / GPS
 
 - Mode del sistema **LTE-M + GPS** (`LTE_M_GPS`); el receptor GNSS s'activa a `gnss.c` (`nrf_modem_gnss_*`).
-- Quan obté un fix vàlid (`NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID`), publica `latitude`/`longitude` al payload i ho mostra al terminal.
-- **Necessita cel obert** (finestra/exterior). A l'interior només veuràs `GNSS: searching satellites...`.
-- El fix pot trigar 30-60 s en arrencada en fred.
+- Quan obté un fix vàlid (`NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID`), publica `latitude`/`longitude` al payload i ho mostra al terminal (`GPS fix: ...`).
+- **Necessita cel obert** (finestra/exterior). A l'interior només veuràs `GNSS: searching...`.
+- El fix pot trigar 30-60 s en arrencada en fred (més amb pocs satèl·lits).
+- **Mode GNSS-únic:** amb el pla terrestre esgotat (LTE rebutjat en bucle), el LTE robava temps de RF i impedia el fix. El flag `MQTT_USE_GNSS_ONLY` (a `net_config.h`) posa el mòdem només en GNSS (sense LTE) per obtenir fix fàcilment. **Quan torni el pla, tornar a 0** per recuperar LTE-M+GPS (MQTT + GNSS).
 
 ## Problemes coneguts
 

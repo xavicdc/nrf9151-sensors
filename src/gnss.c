@@ -7,6 +7,7 @@
 
 static volatile bool gnss_fix_valid;
 static bool gnss_started;
+static uint32_t gnss_fix_count;
 static double last_latitude;
 static double last_longitude;
 static float last_altitude;
@@ -46,6 +47,7 @@ static void gnss_event_handler(int event)
 		last_altitude = pvt.altitude;
 		last_accuracy = pvt.accuracy;
 		gnss_fix_valid = true;
+		gnss_fix_count++;
 
 		if (!prev_valid) {
 			printk("GNSS fix obtained (%d sats)\n", seen);
@@ -90,6 +92,11 @@ int gnss_init(void)
 void gnss_reset(void)
 {
 	gnss_fix_valid = false;
+}
+
+uint32_t gnss_fix_count_get(void)
+{
+	return gnss_fix_count;
 }
 
 void gnss_stop(void)

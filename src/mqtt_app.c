@@ -458,15 +458,10 @@ int mqtt_app_gnss_acquire(int timeout_sec)
 	printk("normal = %d\n", err);
 	k_sleep(K_SECONDS(3));
 
-	gnss_stop();
-	gnss_reset();
-	gnss_start();
+	uint32_t before_count = gnss_fix_count_get();
 
 	for (int i = 0; i < timeout_sec; i++) {
-		double lat, lon;
-		float alt, acc;
-
-		if (gnss_position_get(&lat, &lon, &alt, &acc)) {
+		if (gnss_fix_count_get() > before_count) {
 			got_fix = true;
 			break;
 		}

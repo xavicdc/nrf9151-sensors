@@ -29,7 +29,7 @@
  * un fix net (sense contenció LTE), i després es torna a LTE-M+NB-IoT+GPS
  * per transmetre. La posició queda emmagatzemada entre adquisicions. */
 #define GNSS_ACQUIRE_INTERVAL_SECONDS 300
-#define GNSS_ACQUIRE_TIMEOUT_SECONDS 120
+#define GNSS_ACQUIRE_TIMEOUT_SECONDS 300
 
 #define MQTT_BROKER_USERNAME ""
 #define MQTT_BROKER_PASSWORD ""

@@ -238,18 +238,20 @@ int main(void)
 
 		if (qmp_ok) {
 			int n = snprintk(payload, sizeof(payload),
-				 "{\"temperature\":%d.%03d,\"pressure\":%d.%02d",
-				 temp_mdeg / 1000, abs(temp_mdeg) % 1000,
-				 pressure_pa / 100, abs(pressure_pa) % 100);
+				 "{\"temperature\":%d.%d,\"pressure\":%d",
+				 temp_mdeg / 1000, (abs(temp_mdeg) % 1000) / 100,
+				 pressure_pa / 100);
 
 			double lat, lon;
 			float alt, acc;
 
 			if (gnss_position_get(&lat, &lon, &alt, &acc)) {
 				int lat_deg = (int)lat;
-				int lat_frac = (int)((lat - lat_deg) * 1000000.0);
+				int lat_frac = (int)((lat - lat_deg) * 10000.0);
 				int lon_deg = (int)lon;
-				int lon_frac = (int)((lon - lon_deg) * 1000000.0);
+				int lon_frac = (int)((lon - lon_deg) * 10000.0);
+				int alt_int = (int)alt;
+				int alt_frac = (int)((alt - alt_int) * 10.0);
 
 				if (lat_frac < 0) {
 					lat_frac = -lat_frac;
@@ -257,21 +259,26 @@ int main(void)
 				if (lon_frac < 0) {
 					lon_frac = -lon_frac;
 				}
+				if (alt_frac < 0) {
+					alt_frac = -alt_frac;
+				}
 
-				printk("GPS fix: %d.%06d, %d.%06d (alt %d m, acc %d m)\n",
+				printk("GPS fix: %d.%04d, %d.%04d (alt %d.%d m, acc %d m)\n",
 				       lat_deg, lat_frac, lon_deg, lon_frac,
-				       (int)alt, (int)acc);
+				       alt_int, alt_frac, (int)acc);
 
 				n = strlen(payload);
 				snprintk(payload + n, sizeof(payload) - n,
-					 ",\"latitude\":%d.%06d,\"longitude\":%d.%06d,\"altitude\":%d",
-					 lat_deg, lat_frac, lon_deg, lon_frac, (int)alt);
+					 ",\"latitude\":%d.%04d,\"longitude\":%d.%04d,\"altitude\":%d.%d",
+					 lat_deg, lat_frac, lon_deg, lon_frac,
+					 alt_int, alt_frac);
 			}
 
 			if (sht30_ok) {
 				n = strlen(payload);
 				snprintk(payload + n, sizeof(payload) - n,
-					 ",\"humidity\":%d.%06d", hum.val1, hum.val2);
+					 ",\"humidity\":%d.%d", hum.val1,
+					 hum.val2 / 100000);
 			} else {
 				n = strlen(payload);
 				snprintk(payload + n, sizeof(payload) - n, ",\"humidity\":null");

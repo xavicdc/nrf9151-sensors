@@ -12,6 +12,7 @@
 
 #include "mqtt_app.h"
 #include "net_config.h"
+#include "gnss.h"
 
 LOG_MODULE_REGISTER(mqtt_app, LOG_LEVEL_INF);
 
@@ -237,6 +238,22 @@ static int mqtt_connect_once(void)
 		printk("WARNING: CA cert NOT present in modem\n");
 	}
 
+	enum lte_lc_nw_reg_status rs;
+
+	if (lte_lc_nw_reg_status_get(&rs) == 0) {
+		printk("LTE reg status: %d\n", rs);
+	}
+
+	char pdn_buf[96];
+	int pdn_err = nrf_modem_at_cmd(pdn_buf, sizeof(pdn_buf), "AT+CGPADDR=1");
+
+	if (pdn_err == 0) {
+		pdn_buf[sizeof(pdn_buf) - 1] = '\0';
+		printk("PDN addr: %s\n", pdn_buf);
+	} else {
+		printk("PDN addr query failed: %d\n", pdn_err);
+	}
+
 	err = broker_init(&broker);
 	if (err) {
 		return err;
@@ -283,6 +300,7 @@ static void mqtt_thread(void *a, void *b, void *c)
 
 	while (true) {
 		int err;
+		int connect_fail_count = 0;
 
 		while (!network_up) {
 			mqtt_app_start();
@@ -291,6 +309,22 @@ static void mqtt_thread(void *a, void *b, void *c)
 
 		k_sleep(K_SECONDS(2));
 
+		int64_t pdn_wait = k_uptime_get();
+		bool pdn_ready = false;
+
+		while ((k_uptime_get() - pdn_wait) < 60000) {
+			char pdn_buf[64];
+
+			if (nrf_modem_at_cmd(pdn_buf, sizeof(pdn_buf), "AT+CGPADDR=1") == 0 &&
+			    strchr(pdn_buf, '.') != NULL) {
+				pdn_ready = true;
+				break;
+			}
+			k_sleep(K_SECONDS(2));
+		}
+
+		printk("PDN ready: %d\n", pdn_ready ? 1 : 0);
+
 		printk("Connecting to MQTT broker %s (TLS)\n", MQTT_BROKER_HOSTNAME);
 		k_sem_reset(&connected_sem);
 		mqtt_connected = false;
@@ -298,6 +332,14 @@ static void mqtt_thread(void *a, void *b, void *c)
 		err = mqtt_connect_once();
 		if (err) {
 			printk("mqtt_connect failed: %d\n", err);
+
+			if (++connect_fail_count >= 5) {
+				printk("Forcing LTE re-registration\n");
+				lte_lc_offline();
+				k_sleep(K_SECONDS(2));
+				lte_lc_connect_async(NULL);
+			}
+
 			k_sleep(K_SECONDS(5));
 			continue;
 		}
@@ -396,6 +438,66 @@ static void mqtt_thread(void *a, void *b, void *c)
 
 K_THREAD_DEFINE(mqtt_thread_id, MQTT_APP_STACK_SIZE, mqtt_thread, NULL, NULL, NULL,
 		MQTT_APP_THREAD_PRIORITY, 0, 0);
+
+int mqtt_app_gnss_acquire(int timeout_sec)
+{
+	bool got_fix = false;
+	int err;
+
+	printk("GNSS acquire: going offline\n");
+	network_up = false;
+	err = lte_lc_offline();
+	printk("offline = %d\n", err);
+	k_sleep(K_SECONDS(5));
+
+	err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_GPS, LTE_LC_SYSTEM_MODE_PREFER_AUTO);
+	printk("mode(GPS) = %d\n", err);
+	k_sleep(K_SECONDS(2));
+
+	err = lte_lc_normal();
+	printk("normal = %d\n", err);
+	k_sleep(K_SECONDS(3));
+
+	gnss_stop();
+	gnss_reset();
+	gnss_start();
+
+	for (int i = 0; i < timeout_sec; i++) {
+		double lat, lon;
+		float alt, acc;
+
+		if (gnss_position_get(&lat, &lon, &alt, &acc)) {
+			got_fix = true;
+			break;
+		}
+		k_sleep(K_SECONDS(1));
+	}
+
+	printk("GNSS acquire: %s\n", got_fix ? "FIX" : "no fix");
+
+	err = lte_lc_offline();
+	printk("offline = %d\n", err);
+	k_sleep(K_SECONDS(3));
+
+	err = lte_lc_system_mode_set(IS_ENABLED(MQTT_USE_NTN_NBIOT)
+				     ? LTE_LC_SYSTEM_MODE_NTN_NBIOT
+				     : IS_ENABLED(MQTT_USE_GNSS_ONLY)
+				     ? LTE_LC_SYSTEM_MODE_GPS
+				     : LTE_LC_SYSTEM_MODE_LTEM_GPS,
+				     LTE_LC_SYSTEM_MODE_PREFER_AUTO);
+	printk("mode(LTE) = %d\n", err);
+	k_sleep(K_SECONDS(2));
+
+	err = lte_lc_normal();
+	printk("normal = %d\n", err);
+
+	err = lte_lc_connect_async(NULL);
+	if (err) {
+		printk("lte_lc_connect_async failed: %d\n", err);
+	}
+
+	return got_fix ? 0 : -1;
+}
 
 int mqtt_app_init(void)
 {

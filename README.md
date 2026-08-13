@@ -4,12 +4,12 @@ Monitorització d'entorn amb el **Nordic nRF9151-SMA-DK**, construïda amb el **
 
 ## Estat actual
 
-- ✅ Connexió **LTE-M** amb SIM Deutsche Telekom (APN `internet.m2mportal.de`).
+- ✅ Connexió **LTE-M** amb SIM **Onomondo** (APN `onomondo`), registra com a *roaming* (normal per operador virtual).
 - ✅ Connexió **MQTT 3.1.1 sobre TLS** (`CONFIG_MQTT_LIB_TLS`), certificat del broker verificat amb CA embegut al mòdem.
-- ✅ Publicació cada 60 s a `nrf9151/data` (broker actual: **HiveMQ** `broker.hivemq.com:8883`, validat end-to-end).
-- ✅ **GNSS/GPS** (mode LTE-M+GPS): receptor actiu; publica lat/long quan obté fix (necessita cel obert).
-- ✅ Sensors: **QMP6988** (pressió + temperatura) funcionant.
-- ❌ **SHT30** (humitat): no respon a l'I2C (vegeu [Problemes coneguts](#problemes-coneguts)).
+- ✅ **Alternança automàtica de modes**: cada `GNSS_ACQUIRE_INTERVAL_SECONDS` (5 min) fa un *burst* GNSS-únic per obtenir un fix net, i torna a LTE-M per transmetre. La posició queda emmagatzemada entre adquisicions.
+- ✅ Publicació cada 5 min a `nrf9151/data` (broker actual: **HiveMQ** `broker.hivemq.com:8883`, validat end-to-end).
+- ✅ **GNSS/GPS**: fix net amb satèl·lits; publica `latitude`/`longitude`/`altitude`.
+- ✅ Sensors: **QMP6988** (pressió + temperatura) i **SHT30** (humitat) — el SHT30 requereix **5V** a la línia d'alimentació (a 3.3V no respon).
 - ✅ LEDs (4) i botons (4) amb control per interrupció i debounce; **l'estat de botons i LEDs s'inclou al payload**.
 - ✅ Les dades es mostren al terminal (**PAYLOAD: ...**) independentment de si MQTT està connectat.
 - ✅ Preparat per a **NTN NB-IoT** (satèl·lit) amb `MQTT_USE_NTN_NBIOT` (vegeu [Dades i plans](#dades-i-plans)).
@@ -111,12 +111,12 @@ pio device monitor -p COM19 -b 115200   # Consola (COM20 = boot TF-M)
 
 ## Dades i plans (cadència)
 
-La SIM té un pla **terrestre de 6.5 MB/mes** i un **satel·lital (NTN) de 50 KB/mes**.
+La SIM **Onomondo** té un pla terrestre de **50 MB/mes** (LTE-M/NB-IoT).
 
 - Cada publicació costa ~160 B (payload + MQTT/TCP/IP/TLS) + sobrecost de senyalització LTE-M.
-- **Terrestre (actual):** publicació cada **60 s** (`MQTT_PUBLISH_INTERVAL_SECONDS`) ≈ 230 KB/mes — dins del pla amb marge.
-  - ⚠️ Amb la cadència antiga de **2 s** el consum arribava a ~6.5 MB/mes — **probablement va esgotar el pla**, causant el rebuig de registre **EMM cause 15** de la xarxa.
-- **NTN NB-IoT (satèl·lit, preparat):** `MQTT_USE_NTN_NBIOT=1` + cadència de **3 h** (`MQTT_PUBLISH_INTERVAL_SECONDS_NTN=10800`) ≈ 38 KB/mes.
+- **Terrestre (actual):** publicació cada **5 min** (`MQTT_PUBLISH_INTERVAL_SECONDS`) ≈ 46 KB/mes — marge enorme sobre el pla.
+  - La SIM anterior (Deutsche Telekom, 6.5 MB/mes) es va esgotar amb una cadència de 2 s, causant el rebuig **EMM cause 15**.
+- **NTN NB-IoT (satèl·lit, preparat):** `MQTT_USE_NTN_NBIOT=1` + cadència de 3 h (`MQTT_PUBLISH_INTERVAL_SECONDS_NTN=10800`) ≈ 38 KB/mes.
   - ⚠️ Requereix el **firmware de mòdem NTN** (`mfw_nrf9151-ntn`), diferent del terrestre, i que el pla satel·lital estigui actiu.
 
 ## GNSS / GPS
@@ -129,8 +129,8 @@ La SIM té un pla **terrestre de 6.5 MB/mes** i un **satel·lital (NTN) de 50 KB
 
 ## Problemes coneguts
 
-### SHT30 no detectat
-L'escàner I2C només troba `0x70` (QMP6988). El SHT30 (0x44/0x45) no respon ni amb *soft reset* (prova a `sht30_probe()`), ni baixant el bus a 100 kHz, ni en cap altra placa. Conclusió: el xip SHT30 d'aquest mòdul ENV III concret no respon elèctricament al bus; el QMP6988 (mateix bus/cable) funciona perfectament. El firmware continua publicant amb `"humidity":null`.
+### SHT30 no detectat (resolt)
+Inicialment el SHT30 (0x44) no responia a l'I2C. **Causa: la línia d'alimentació estava a 3.3V** — el mòdul requereix 5V. Alimentant-lo a **5V** ja respon i publica la humitat.
 
 ### Broker propi darrere Cloudflare Quick Tunnel (WebSocket)
 El túnel *quick* de `trycloudflare.com` només encamina HTTP/HTTPS/WebSocket (no TCP pur). El mòdem nRF91 no pot fer MQTT-over-WebSocket (limitació SHA1 a TF-M), per tant un broker exposat així **no és accessible** des del dispositiu. Solucions: túnel TCP pur (`bore`, `rathole`, `frp`), broker amb IP pública, o un broker VPS.

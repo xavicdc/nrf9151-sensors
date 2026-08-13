@@ -146,7 +146,13 @@ int main(void)
 	printk("nRF9151-SMA-DK sensors + LED/button control + MQTT\n");
 
 	mqtt_app_init();
-	gnss_init();
+
+	for (int i = 0; i < 24; i++) {
+		if (gnss_init() == 0) {
+			break;
+		}
+		k_sleep(K_SECONDS(5));
+	}
 
 	for (int i = 0; i < NUM_LEDS; i++) {
 		if (!device_is_ready(leds[i].port) || !device_is_ready(buttons[i].port)) {
@@ -196,8 +202,16 @@ int main(void)
 		bool sht30_ok = false;
 		bool qmp_ok = false;
 		char payload[160];
+		static int64_t last_acquire_ms = 0;
 
 		gnss_init();
+
+		if (last_acquire_ms < 0 ||
+		    (k_uptime_get() - last_acquire_ms) >=
+			    (GNSS_ACQUIRE_INTERVAL_SECONDS * 1000)) {
+			mqtt_app_gnss_acquire(GNSS_ACQUIRE_TIMEOUT_SECONDS);
+			last_acquire_ms = k_uptime_get();
+		}
 
 		if (qmp6988_read(i2c_dev, &pressure_pa, &temp_mdeg) == 0) {
 			qmp_ok = true;

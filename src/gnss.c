@@ -87,6 +87,28 @@ int gnss_init(void)
 	return 0;
 }
 
+void gnss_reset(void)
+{
+	gnss_fix_valid = false;
+}
+
+void gnss_stop(void)
+{
+	nrf_modem_gnss_stop();
+}
+
+void gnss_start(void)
+{
+	if (!gnss_started) {
+		gnss_init();
+		return;
+	}
+
+	if (nrf_modem_gnss_start() != 0) {
+		printk("GNSS: failed to (re)start\n");
+	}
+}
+
 bool gnss_position_get(double *latitude, double *longitude, float *altitude,
 		       float *accuracy)
 {

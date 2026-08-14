@@ -7,6 +7,3 @@ build/
 
 # IDE local config
 .vscode/
-
-# nRF Cloud credentials (secrets)
-prj.local.conf

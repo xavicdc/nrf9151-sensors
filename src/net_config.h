@@ -25,11 +25,11 @@
  * GNSS-únic cada GNSS_ACQUIRE_INTERVAL_SECONDS per obtenir fix net. */
 #define MQTT_USE_GNSS_ONLY 0
 
-/* Alternança de modes: cada interval, es fa un burst GNSS-únic per obtenir
- * un fix net (sense contenció LTE), i després es torna a LTE-M+NB-IoT+GPS
- * per transmetre. La posició queda emmagatzemada entre adquisicions. */
-#define GNSS_ACQUIRE_INTERVAL_SECONDS 300
-#define GNSS_ACQUIRE_TIMEOUT_SECONDS 300
+/* Alternança de modes: cada interval, es fa un burst GNSS-únic llarg (15 min)
+ * per obtenir un fix net (el GNSS triga ~10 min a descodificar l'efemèride),
+ * i després es torna a LTE-M+GPS per transmetre. La posició queda emmagatzemada. */
+#define GNSS_ACQUIRE_INTERVAL_SECONDS 3600
+#define GNSS_ACQUIRE_TIMEOUT_SECONDS 900
 
 #define MQTT_BROKER_USERNAME ""
 #define MQTT_BROKER_PASSWORD ""

@@ -237,3 +237,27 @@ La SIM té un pla satel·lital de **50 KB/mes**. S'ha preparat el codi per a NTN
 ### 12.4 Aprenentatge de diagnòstic
 
 En aquesta versió del NCS, els enums de mode són: `LTE_LC_LTE_MODE_LTEM = 7` i `LTE_LC_LTE_MODE_NBIOT = 9` (no 1 i 2). Interpretar-los amb els valors d'una altra versió va portar a una diagnosi errònia (pensar que el mòdem estava en "multimode") quan en realitat estava correctament en LTE-M i el rebuig era de la xarxa.
+
+---
+
+## 13. Evolució posterior: Onomondo, GNSS i A-GNSS
+
+### 13.1 Canvi a SIM Onomondo
+- APN **`onomondo`** (operador virtual; registra com a *roaming*).
+- Pla **50 MB/mes** LTE-M/NB-IoT. Cadència de publicació baixada a **5 min** (≈46 KB/mes).
+- Es va provar LTE-M+NB-IoT+GPS, però el GNSS no generava events amb NB-IoT; es va fixar en **LTE-M+GPS**.
+
+### 13.2 Descobriment de l'SHT30 (resolt)
+- El SHT30 no responia a 3.3V. **Causa: el mòdul requereix 5V.** Alimentant-lo a 5V respon i publica la humitat.
+
+### 13.3 El repte del fix GNSS
+- **Stack overflow** resolt: el `struct nrf_modem_gnss_pvt_data_frame` (gran) s'havia de declarar estàtic a l'event handler; es va treure el printf amb floats del thread del mòdem; `CONFIG_FPU_SHARING` + `CONFIG_MAIN_STACK_SIZE=4096`.
+- El GNSS no arrencava mentre LTE es registrava (contenció RF) → **retry de `gnss_init()`** cada 5 s fins que LTE quedés idle.
+- El GNSS veia satèl·lits però **no fixava amb LTE actiu** (contenció RF) → es va dissenyar l'**alternança de modes**: burst GNSS-únic per obtenir fix, després LTE per transmetre.
+- La primera alternança (cada 5 min) **interrompia el GNSS** abans de descodificar l'efemèride → **finestra llarga (15 min) cada hora** + retenció de l'última posició.
+- **Antena**: canviar a una antena GNSS adequada va pujar el cn0 de ~30-35 a **40-49 dBHz**.
+- **A-GNSS minimal** implementat (sense compte de núvol): escriptura de l'almanac de fàbrica al mòdem + injecció d'hora (`AT+CCLK`) i ubicació (MCC via `AT%XMONITOR`) quan LTE es registra. La injecció corre en un thread dedicat (les ordres AT bloquegen).
+- **Resultat:** amb GNSS-únic ininterromput + assistència, el fix arriba en ~10 min: `GPS fix: 41.4840, 2.1526 (alt 115.1 m, acc 11 m)`.
+
+### 13.4 Conclusió clau
+El GNSS **sí funciona**; necessita una finestra llarga sense interrupcions i (idealment) A-GNSS amb efemèride fresca per fixar ràpid.

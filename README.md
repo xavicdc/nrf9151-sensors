@@ -148,4 +148,8 @@ mosquitto_sub -h broker.hivemq.com -p 8883 --cafile src/ca-cert.pem -t 'nrf9151/
 
 ## Historial del procés
 
-Vegeu [docs/PROCESS.md](docs/PROCESS.md) per a la crònica detallada i exhaustiva del desenvolupament, els diagnòstics i els aprenentatges (SHT30, LTE, certificats TLS, WebSocket, MAX_PATH, etc.).
+Vegeu [docs/PROCESS.md](docs/PROCESS.md) per a la crònica detallada i exhaustiva del desenvolupament, els diagnòstics i els aprenentatges (SHT30, LTE, certificats TLS, WebSocket, MAX_PATH, GNSS, A-GNSS, etc.).
+
+## Propostes
+
+Vegeu [docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md) per a la proposta de millora del sistema i la proposta d'implementació per a xarxes satel·litals **LEO/GEO via TTN** (LoRaWAN) i **NTN NB-IoT**.

@@ -4,6 +4,7 @@
 #include <nrf_modem_gnss.h>
 
 #include "gnss.h"
+#include "agnss.h"
 
 static volatile bool gnss_fix_valid;
 static bool gnss_started;
@@ -18,6 +19,17 @@ static void gnss_event_handler(int event)
 	static struct nrf_modem_gnss_pvt_data_frame pvt;
 	static uint32_t pvt_count;
 	static bool prev_valid;
+
+	if (event == NRF_MODEM_GNSS_EVT_AGNSS_REQ) {
+		struct nrf_modem_gnss_agnss_data_frame req;
+
+		if (nrf_modem_gnss_read(&req, sizeof(req),
+					NRF_MODEM_GNSS_DATA_AGNSS_REQ) == 0) {
+			printk("GNSS: A-GNSS data requested, injecting assistance\n");
+			agnss_request(&req);
+		}
+		return;
+	}
 
 	if (event != NRF_MODEM_GNSS_EVT_PVT) {
 		return;

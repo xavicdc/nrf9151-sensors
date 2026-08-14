@@ -13,6 +13,7 @@
 #include "mqtt_app.h"
 #include "net_config.h"
 #include "gnss.h"
+#include "agnss.h"
 
 LOG_MODULE_REGISTER(mqtt_app, LOG_LEVEL_INF);
 
@@ -306,6 +307,9 @@ static void mqtt_thread(void *a, void *b, void *c)
 			mqtt_app_start();
 			k_sem_take(&net_ready_sem, K_SECONDS(5));
 		}
+
+		/* Network is up: inject A-GNSS time/location (need network time + PLMN). */
+		agnss_request_force();
 
 		k_sleep(K_SECONDS(2));
 

@@ -9,6 +9,7 @@
 #include "qmp6988.h"
 #include "mqtt_app.h"
 #include "gnss.h"
+#include "agnss.h"
 #include "net_config.h"
 
 #define I2C_NODE DT_NODELABEL(i2c2)
@@ -146,6 +147,7 @@ int main(void)
 	printk("nRF9151-SMA-DK sensors + LED/button control + MQTT\n");
 
 	mqtt_app_init();
+	agnss_init();
 
 	for (int i = 0; i < 24; i++) {
 		if (gnss_init() == 0) {

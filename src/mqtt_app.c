@@ -407,8 +407,13 @@ static void mqtt_thread(void *a, void *b, void *c)
 
 			if (k_uptime_get() - last_live_ms >=
 			    (CONFIG_MQTT_KEEPALIVE * 1000) / 2) {
-				if (mqtt_live(&mqtt_client) != 0) {
-					printk("mqtt_live error\n");
+				err = mqtt_live(&mqtt_client);
+
+				/* -EAGAIN = encara no toca ping (no ha passat el
+				 * keepalive complet des de l'última activitat).
+				 */
+				if (err < 0 && err != -EAGAIN) {
+					printk("mqtt_live error: %d\n", err);
 					break;
 				}
 				last_live_ms = k_uptime_get();

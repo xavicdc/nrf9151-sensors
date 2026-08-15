@@ -150,7 +150,7 @@ mosquitto_sub -h broker.hivemq.com -p 8883 --cafile src/ca-cert.pem -t 'nrf9151/
 
 ## Historial del procés
 
-Vegeu [docs/PROCESS.md](docs/PROCESS.md) per a la crònica detallada i exhaustiva del desenvolupament, els diagnòstics i els aprenentatges (SHT30, LTE, certificats TLS, WebSocket, MAX_PATH, GNSS, A-GNSS, etc.).
+Vegeu [docs/PROCESS.md](docs/PROCESS.md) per a la crònica detallada i exhaustiva del desenvolupament, els diagnòstics i els aprenentatges (SHT30, LTE, certificats TLS, WebSocket, MAX_PATH, GNSS, A-GNSS, etc.). També inclou el [diagrama de flux del programa](docs/PROCESS.md#15-diagrama-de-flux-del-programa) (arquitectura de threads, flux principal i connexió MQTT).
 
 ## Propostes
 

@@ -338,3 +338,94 @@ last_live_ms = k_uptime_get();
 **Verificació:** 180 s de monitoratge continu sense cap caiguda (`MQTT connected` + `Published` i la connexió es manté).
 
 > **Aprenentatge:** `mqtt_live()` no és una ordre "envia un ping ara": és una comprovació que **decideix** si cal ping. `-EAGAIN` significa "no cal ping encara", no un error.
+
+---
+
+## 15. Diagrama de flux del programa
+
+Vista general de l'arquitectura de threads i del flux principal del firmware (renderitzat amb Mermaid).
+
+```mermaid
+flowchart TD
+    START(["Inici / reset"]) --> MAIN["main"]
+    MAIN --> MODEMINIT["mqtt_app_init()<br/>nrf_modem_lib_init()"]
+    MODEMINIT --> HOOK{"ON_INIT ok?"}
+    HOOK -->|"sí"| PROV["credentials_provision<br/>CA cert sec_tag 955 + APN"]
+    HOOK -->|"no"| FALLBACK["main continua"]
+    PROV --> MAIN2["agnss_init<br/>almanac de fàbrica"]
+    MAIN2 --> GNSSINIT["gnss_init retry<br/>màx 24 x 5 s"]
+    GNSSINIT --> HW["LEDs + botons + I2C<br/>QMP6988 / SHT30 init"]
+    HW --> LOOP
+
+    subgraph THREADS["Threads del sistema"]
+        MT["mqtt_thread"]
+        AT["agnss_thread"]
+        GE["handler event GNSS"]
+    end
+
+    MODEMINIT --> MT
+    MODEMINIT --> AT
+    GNSSINIT --> GE
+
+    subgraph MAINLOOP["Bucle principal"]
+        LOOP{{"cada 5 min"}} --> ACQ{"Passat interval GNSS 1 h?"}
+        ACQ -->|"sí"| GACQ["mqtt_app_gnss_acquire<br/>burst GNSS-únic fins a 15 min"]
+        GACQ --> SENSORS
+        ACQ -->|"no"| SENSORS
+        SENSORS["Llegir QMP6988 + SHT30<br/>gnss_position_get"] --> JSON["Construir JSON + PAYLOAD"]
+        JSON --> PUB["mqtt_app_publish (cua msgq)"]
+    end
+
+    subgraph MQTTCONN["Thread MQTT"]
+        MT --> MW{"network_up?"}
+        MW -->|"no"| MWAIT["Esperar net_ready_sem 5 s"]
+        MWAIT --> MW
+        MW -->|"sí"| AF["agnss_request_force"]
+        AF --> PDN{"PDN llest?<br/>AT+CGPADDR 60 s"}
+        PDN -->|"no"| PDNR["Reintentar cada 2 s"]
+        PDNR --> PDN
+        PDN -->|"sí"| CONN["mqtt_connect_once<br/>verifica CA, broker_init, TLS"]
+        CONN --> CW{"poll + mqtt_input<br/>CONNACK 30 s"}
+        CW -->|"no"| CRETRY["5 s i reconnecta<br/>re-registració LTE si 5 fallades"]
+        CRETRY --> MW
+        CW -->|"sí"| CLIVE{"Bucle connectat<br/>poll 1 s"}
+        CLIVE -->|"PUBLISH en cua"| CPUB["mqtt_publish"]
+        CPUB --> CLIVE
+        CLIVE -->|"més de 60 s inactiu"| CLV["mqtt_live"]
+        CLV -->|"0"| CLIVE
+        CLV -->|"-EAGAIN no cal ping"| CLIVE
+        CLV -->|"error real"| CLOST["Connexió perduda<br/>reconnectar"]
+        CLOST --> MW
+    end
+
+    subgraph AGNSSTHREAD["Thread A-GNSS"]
+        AT --> AWS{"agnss_sem?"}
+        AWS -->|"lliberat"| ARL{"Rate-limit 60 s?"}
+        ARL -->|"sí"| AINJ["time_inject AT+CCLK<br/>location_inject AT%XMONITOR MCC"]
+        AINJ --> AWS
+        ARL -->|"no"| AWS
+    end
+
+    subgraph GNSSEVT["GNSS event handler"]
+        GE --> GEVT{"Event"}
+        GEVT -->|"AGNSS_REQ"| GREQ["agnss_request (agnss_sem)"]
+        GREQ --> GE
+        GEVT -->|"PVT"| GPVT["Llegir PVT"]
+        GPVT --> GFIX{"FIX_VALID?"}
+        GFIX -->|"sí"| GSAVE["Guardar lat/lon/alt/acc<br/>gnss_fix_count++"]
+        GFIX -->|"no"| GSEARCH["GNSS searching..."]
+        GSAVE --> GE
+        GSEARCH --> GE
+    end
+
+    PUB --> CLIVE
+    GACQ -.->|"offline / GPS / LTE"| MODEMINIT
+```
+
+### Llegenda i notes
+
+- **`main`** inicialitza el mòdem (que dispara el hook de provisionament de credencials), l'A-GNSS i el GNSS, configura el maquinari i entra al bucle principal.
+- **3 threads** corren en paral·lel: el bucle principal (sensors/publicació), el thread MQTT (LTE + connexió + keepalive + publicació) i el thread A-GNSS (injecció d'assistència, rate-limitada a 60 s).
+- **GNSS** es comunica per events (`nrf_modem_gnss_event_handler_set`): les sol·licituds d'A-GNSS es deriven al thread A-GNSS (les ordres AT bloquegen) i els PVT actualitzen la posició guardada.
+- **Publicació:** `main` construeix el JSON i el posa a una cua `k_msgq` (4 items); el thread MQTT el buida i publica quan està connectat. Si la connexió cau, els items s'acumulen a la cua i s'envien en reconnectar (o es descarten si s'omple).
+- **Alternança GNSS/LTE:** cada hora `mqtt_app_gnss_acquire()` passa el mòdem a GNSS-únic (fins a 15 min) per obtenir fix net, i torna a LTE-M+GPS per transmetre.

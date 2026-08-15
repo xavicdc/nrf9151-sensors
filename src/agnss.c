@@ -159,7 +159,15 @@ static void agnss_thread(void *a, void *b, void *c)
 	ARG_UNUSED(c);
 
 	while (true) {
+		static int64_t last_process_ms = -60000;
+
 		k_sem_take(&agnss_sem, K_FOREVER);
+
+		/* Rate-limit: avoid spamming AT commands if the GNSS cannot fix. */
+		if ((k_uptime_get() - last_process_ms) < 60000) {
+			continue;
+		}
+		last_process_ms = k_uptime_get();
 
 		k_sleep(K_SECONDS(2));
 

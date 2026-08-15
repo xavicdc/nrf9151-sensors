@@ -6,9 +6,10 @@ Monitorització d'entorn amb el **Nordic nRF9151-SMA-DK**, construïda amb el **
 
 - ✅ Connexió **LTE-M** amb SIM **Onomondo** (APN `onomondo`), registra com a *roaming* (normal per operador virtual).
 - ✅ Connexió **MQTT 3.1.1 sobre TLS** (`CONFIG_MQTT_LIB_TLS`), certificat del broker verificat amb CA embegut al mòdem.
-- ✅ **Alternança automàtica de modes**: cada `GNSS_ACQUIRE_INTERVAL_SECONDS` (5 min) fa un *burst* GNSS-únic per obtenir un fix net, i torna a LTE-M per transmetre. La posició queda emmagatzemada entre adquisicions.
+- ✅ **Alternança automàtica de modes**: cada `GNSS_ACQUIRE_INTERVAL_SECONDS` (1 h) fa un *burst* GNSS-únic de fins a 15 min (`GNSS_ACQUIRE_TIMEOUT_SECONDS`) per obtenir un fix net, i torna a LTE-M per transmetre. La posició queda emmagatzemada entre adquisicions.
 - ✅ Publicació cada 5 min a `nrf9151/data` (broker actual: **HiveMQ** `broker.hivemq.com:8883`, validat end-to-end).
 - ✅ **GNSS/GPS**: fix net amb satèl·lits; publica `latitude`/`longitude`/`altitude`.
+- ✅ **Connexió MQTT estable**: fixat un bug de keepalive on `mqtt_live()` retornava `-EAGAIN` (no cal ping encara) i es tractava com a error fatal, tallant la connexió cada ~60 s. Ara la connexió es manté (vegeu `docs/PROCESS.md` §14.3).
 - ✅ Sensors: **QMP6988** (pressió + temperatura) i **SHT30** (humitat) — el SHT30 requereix **5V** a la línia d'alimentació (a 3.3V no respon).
 - ✅ LEDs (4) i botons (4) amb control per interrupció i debounce; **l'estat de botons i LEDs s'inclou al payload**.
 - ✅ Les dades es mostren al terminal (**PAYLOAD: ...**) independentment de si MQTT està connectat.
@@ -26,7 +27,7 @@ Exemple de payload:
 |---------|--------|
 | Placa | nRF9151-SMA-DK (nRF9151, LTE-M/NB-IoT) |
 | Mòdul sensors | M5Stack ENV III (SHT30 + QMP6988) al bus I2C2 (Arduino header, P0.30=SDA, P0.31=SCL) |
-| SIM | Deutsche Telekom IoT, APN `internet.m2mportal.de` |
+| SIM | Onomondo (operador virtual, LTE-M/NB-IoT), APN `onomondo` |
 | Broker MQTT | Configurable a `src/net_config.h` (per defecte: HiveMQ públic) |
 
 ## Arquitectura del firmware
@@ -46,7 +47,7 @@ src/
 ### Flux d'arrencada
 
 1. `main()` crida `mqtt_app_init()` → `nrf_modem_lib_init()` (inicialitza el mòdem).
-2. El hook `NRF_MODEM_LIB_ON_INIT` (a `credentials.c`) provisiona el **CA cert** (sec tag 955) i configura l'**APN** via `AT+CGDCONT=1,"IP","internet.m2mportal.de"`, i després crida `mqtt_app_start()`.
+2. El hook `NRF_MODEM_LIB_ON_INIT` (a `credentials.c`) provisiona el **CA cert** (sec tag 955) i configura l'**APN** via `AT+CGDCONT=1,"IP","onomondo"`, i després crida `mqtt_app_start()`.
 3. `mqtt_app_start()` registra el handler de LTE i crida `lte_lc_connect_async()`.
 4. Quan LTE es registra (`LTE_LC_NW_REG_REGISTERED_HOME/ROAMING`), el thread MQTT connecta al broker: `mqtt_connect()` → socket TLS del mòdem → `CONNACK`.
 5. El thread fa `poll()` + `mqtt_input()` (processa el CONNACK) i, un cop connectat, buida la cua de payloads (`k_msgq`) publicant cada dades que arriba de `main()`.
@@ -63,7 +64,7 @@ src/
 #define MQTT_BROKER_USERNAME ""                     // usuari (buit = sense autenticació)
 #define MQTT_BROKER_PASSWORD ""                     // password
 #define MQTT_TLS_SEC_TAG     955                    // sec_tag on es desa el CA cert al mòdem
-#define LTE_APN              "internet.m2mportal.de"
+#define LTE_APN              "onomondo"
 ```
 
 > ⚠️ **Credencials:** `net_config.h` és el fitxer on van usuari/password del broker. **No commitis mai credencials reals.** Aquest repositori es commiteja amb el broker públic HiveMQ (credencials buides).
@@ -118,6 +119,7 @@ La SIM **Onomondo** té un pla terrestre de **50 MB/mes** (LTE-M/NB-IoT).
   - La SIM anterior (Deutsche Telekom, 6.5 MB/mes) es va esgotar amb una cadència de 2 s, causant el rebuig **EMM cause 15**.
 - **NTN NB-IoT (satèl·lit, preparat):** `MQTT_USE_NTN_NBIOT=1` + cadència de 3 h (`MQTT_PUBLISH_INTERVAL_SECONDS_NTN=10800`) ≈ 38 KB/mes.
   - ⚠️ Requereix el **firmware de mòdem NTN** (`mfw_nrf9151-ntn`), diferent del terrestre, i que el pla satel·lital estigui actiu.
+  - Quan hi hagi el **pla satel·lital de Deutsche Telekom** actiu, segueix el pla d'acció detallat a `docs/IMPROVEMENTS.md` §2.2bis (APN NTN, firmware NTN, config i rollback).
 
 ## GNSS / GPS
 

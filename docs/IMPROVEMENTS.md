@@ -42,6 +42,27 @@ Aquest document recull (1) propostes de millora del sistema actual i (2) una pro
 
 ---
 
+## 1 bis. Propostes de millora (sessió 2026-08-15)
+
+### 1bis.1 Estabilitat de la connexió MQTT (fet)
+- **Bug `mqtt_live -EAGAIN` resolt:** la connexió es tallava cada ~60 s perquè `mqtt_live()` retornava `-EAGAIN` (no cal ping encara) i el codi ho tractava com a error fatal. Ara `-EAGAIN` es considera normal (patró del sample NCS). Vegeu `docs/PROCESS.md` §14.3.
+- **Incident CA cert resolt:** si el dispositiu diu `CA cert NOT present in modem`, re-flashejar el firmware (l'`NRF_MODEM_LIB_ON_INIT` torna a provisionar el cert). Vegeu `docs/PROCESS.md` §14.2.
+
+### 1bis.2 Robustesa davant pèrdua de credencials del mòdem
+- **Problema:** el CA cert (sec_tag 955) es pot esborrar del mòdem; aleshores TLS falla fins que es re-flasheja.
+- **Millora proposada:** verificar la presència del cert a l'arrencada (ja es fa a `mqtt_connect_once`, `modem_key_mgmt_exists`) i, si falta, **re-provisionar-lo automàticament** abans de connectar, sense esperar el reflash manual.
+
+### 1bis.3 Reintentar amb backoff en comptes de reconnectar en bucle
+- Actualment el thread MQTT reconnecta cada ~5 s quan falla. Proposta: backoff exponencial (5 s → 30 s → 2 min → 5 min, amb límit) per reduir senyalització LTE i desgast de la xarxa quan no hi ha cobertura.
+
+### 1bis.4 Publicació amb timestamp i senyal
+- Afegir al payload el **nivell de senyal** (RSRP/RSRQ via `AT+CESQ` o `lte_lc`) i un **timestamp** per correlacionar dades al broker.
+
+### 1bis.5 Guardar l'estat del payload quan MQTT està desconnectat
+- Si la cua (4 items) s'omple amb MQTT caigut, els missatges es descarten. Proposta: **retenir l'últim payload** (retain) o persistir-lo a NVM (NVS) per enviar-lo quan torni la connexió.
+
+---
+
 ## 2. Proposta d'implementació per a xarxes LEO i GEO via TTN
 
 ### 2.1 Context tècnic (important)
@@ -76,6 +97,43 @@ Recomanada perquè **no cal maquinari nou** — només firmware i un pla satel·
 - NB-IoT satel·lital té **baixa velocitat** i **alta latència** (els sats no estan sempre a la vista).
 - Cost per missatge relativament alt; per això la cadència de 3 h.
 - Cobertura depèn del satèl·lit (LEO = finestres de visibilitat, GEO = cobertura fixa).
+
+---
+
+### 2.2bis Pla d'acció NTN quan estigui disponible el pla satel·lital de Deutsche Telekom
+
+El nRF9151 es va provar inicialment amb una SIM **Deutsche Telekom** (`internet.m2mportal.de`). Quan estigui disponible el **pla satel·lital NB-IoT de Deutsche Telekom** (que ofereix NTN NB-IoT via satèl·lits GEO/LEO), el pla d'activació és:
+
+#### Passos (ordre recomanat)
+
+1. **Confirmar el pla i l'APN NTN**
+   - El pla satel·lital pot requerir un **APN diferent** (consultar amb Deutsche Telekom, ex. `iot.telekom` o el que indiquin per a NTN) i possiblement canviar la SIM.
+   - Verificar que la SIM està **provisionada per NTN** (a diferència del pla terrestre, el satel·lital s'activa per operador, no per config).
+
+2. **Firmware de mòdem NTN** (`mfw_nrf9151-ntn`)
+   - Descàrregar el firmware de mòdem NTN de Nordic (via nRF Connect for Desktop / descàrregues de Nordic) i **flashejar-lo**.
+   - ⚠️ **No es poden usar el firmware terrestre i el NTN alhora** — flashejar NTN elimina la capacitat LTE-M terrestre fins a tornar a flashejar el terrestre.
+
+3. **Configuració del firmware (fita llesta)**
+   - `src/net_config.h`:
+     - `MQTT_USE_NTN_NBIOT 1`
+     - `MQTT_PUBLISH_INTERVAL_SECONDS_NTN 10800` (3 h)
+     - `LTE_APN "<apn-ntn>"` (el que indiqui DT)
+   - `prj.conf`: `CONFIG_LTE_NETWORK_MODE_NTN_NBIOT=y`.
+   - Recompilar i flashejar amb `pio run -t upload`.
+
+4. **Prova de connectivitat**
+   - Observar al terminal: ha d'aparèixer registre en xarxa (el `LTE_LC_NW_REG_REGISTERED_ROAMING` pot venir de la xarxa satel·lital).
+   - `MQTT connected` + `Published` per validar el pipeline NTN → Internet → broker.
+
+5. **Validació del consum de dades**
+   - Amb 3 h de cadència ≈ 38 KB/mes, dins del límit d'un pla NTN típic (50 KB/mes). Monitorar el portal de DT el primer mes.
+
+#### Consideracions específiques de Deutsche Telekom
+
+- La cadència de 5 min actual és inviable per satèl·lit (cost i backlog dels missatges quan el sat no està a la vista).
+- **GNSS:** el mode `LTE_M_GPS` terrestre canvia; en NTN el mòdem es posa en `LTE_LC_SYSTEM_MODE_NTN_NBIOT`. Revisar si cal mantenir GNSS (els sats de posicionament no són els de comunicacions).
+- **Rollback:** guardar sempre la imatge/instruccions per tornar al firmware terrestre + `MQTT_USE_NTN_NBIOT=0` si el pla NTN no funciona (mode "fallback" ja previst a la secció 2.4).
 
 ---
 

@@ -261,3 +261,80 @@ En aquesta versió del NCS, els enums de mode són: `LTE_LC_LTE_MODE_LTEM = 7` i
 
 ### 13.4 Conclusió clau
 El GNSS **sí funciona**; necessita una finestra llarga sense interrupcions i (idealment) A-GNSS amb efemèride fresca per fixar ràpid.
+
+---
+
+## 14. Sessió 2026-08-15: estabilització (A-GNSS, cert CA, keepalive MQTT)
+
+Tres problemes trobats i resolts, més un incident diagnosticat i resolt amb un reflash:
+
+### 14.1 Rate-limit del thread A-GNSS (commit `d01ae1a`)
+
+**Símptoma:** quan el GNSS no aconseguia fix (cel cobert), el mòdem rebia un gran volum d'ordres AT d'assistència un cop per segon (una per cada `NRF_MODEM_GNSS_EVT_AGNSS_REQ`).
+
+**Fix:** rate-limit de 60 s al thread d'A-GNSS (`src/agnss.c`): tot i que el semàfor es desperti sovint, només processa una sol·licitud cada 60 s.
+
+```c
+static int64_t last_process_ms = -60000;
+k_sem_take(&agnss_sem, K_FOREVER);
+if ((k_uptime_get() - last_process_ms) < 60000) {
+    continue;
+}
+last_process_ms = k_uptime_get();
+```
+
+### 14.2 Incident: CA cert perdut al mòdem + reflash (resolt)
+
+**Símptoma (després d'un encesa):** el dispositiu quedava en un bucle de reconnexió:
+
+```
+PDN ready: 0
+WARNING: CA cert NOT present in modem
+lte_lc: Could not get registration status, error: -1
+PDN addr query failed: -1
+mqtt_connect failed: -105
+```
+
+**Diagnosi:** el CA cert s'havia esborrat de la memòria de credencials del mòdem (sec_tag 955), de manera que el handshake TLS no es podia completar; a més, el mòdem responia malament a les ordres AT (registre LTE no consultable).
+
+**Solució:** **re-flashejar el firmware** (`pio run -t upload`). A l'arrencada, `credentials.c` re-provisiona el CA cert (`modem_key_mgmt_write`) i el mòdem es reinicia net. Després del flash:
+
+```
+CA cert present in modem
+LTE reg status: 5
+PDN addr: OK
+MQTT connected
+Published: {...}
+```
+
+> **Aprenentatge:** si el dispositiu es queixa que el CA cert no és al mòdem, el fix ràpid és re-flashejar (l'`NRF_MODEM_LIB_ON_INIT` el torna a escriure). És un problema de persistència de credencials del mòdem, no del firmware.
+
+### 14.3 Bug de keepalive MQTT: `mqtt_live error` / `MQTT connection lost` (commit `0e9c240`)
+
+**Símptoma:** la connexió MQTT es tallava repetidament:
+
+```
+MQTT connected
+Published: {...}
+mqtt_live error
+MQTT connection lost, reconnecting...
+```
+
+**Causa arrel:** `mqtt_live()` de la llibreria MQTT de Zephyr retorna **`-EAGAIN`** quan encara no toca enviar el PINGREQ (perquè no ha passat el keepalive complet des de l'última activitat real — els PUBLISH actualitzen `client->internal.last_activity`). El nostre codi tractava qualsevol retorn `!= 0` com un error fatal i tallava la connexió.
+
+Amb `CONFIG_MQTT_KEEPALIVE=120` i la crida a `mqtt_live` cada 60 s, després de cada publicació la llibreria sempre responia `-EAGAIN` (només han passat 60 s des de l'última activitat, no els 120 s complets) → la connexió queia sistemàticament.
+
+**Fix** (patró oficial del sample NCS):
+
+```c
+err = mqtt_live(&mqtt_client);
+if (err < 0 && err != -EAGAIN) {
+    printk("mqtt_live error: %d\n", err);
+    break;
+}
+last_live_ms = k_uptime_get();
+```
+
+**Verificació:** 180 s de monitoratge continu sense cap caiguda (`MQTT connected` + `Published` i la connexió es manté).
+
+> **Aprenentatge:** `mqtt_live()` no és una ordre "envia un ping ara": és una comprovació que **decideix** si cal ping. `-EAGAIN` significa "no cal ping encara", no un error.

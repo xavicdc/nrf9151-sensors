@@ -29,6 +29,7 @@
 
 K_SEM_DEFINE(agnss_sem, 0, 1);
 static struct nrf_modem_gnss_agnss_data_frame pending_req;
+static volatile bool force_process;
 
 static void factory_almanac_write(void)
 {
@@ -149,7 +150,25 @@ void agnss_request_force(void)
 	memset(&pending_req, 0, sizeof(pending_req));
 	pending_req.data_flags = NRF_MODEM_GNSS_AGNSS_GPS_SYS_TIME_AND_SV_TOW_REQUEST |
 				 NRF_MODEM_GNSS_AGNSS_POSITION_REQUEST;
+	force_process = true;
 	k_sem_give(&agnss_sem);
+}
+
+static int64_t last_process_ms = -60000;
+
+static void agnss_process(void)
+{
+	k_sleep(K_SECONDS(2));
+
+	printk("AGNSS: processing assistance request\n");
+
+	if (pending_req.data_flags & NRF_MODEM_GNSS_AGNSS_GPS_SYS_TIME_AND_SV_TOW_REQUEST) {
+		time_inject();
+	}
+
+	if (pending_req.data_flags & NRF_MODEM_GNSS_AGNSS_POSITION_REQUEST) {
+		location_inject();
+	}
 }
 
 static void agnss_thread(void *a, void *b, void *c)
@@ -159,27 +178,19 @@ static void agnss_thread(void *a, void *b, void *c)
 	ARG_UNUSED(c);
 
 	while (true) {
-		static int64_t last_process_ms = -60000;
-
 		k_sem_take(&agnss_sem, K_FOREVER);
 
-		/* Rate-limit: avoid spamming AT commands if the GNSS cannot fix. */
-		if ((k_uptime_get() - last_process_ms) < 60000) {
+		/* Rate-limit: avoid spamming AT commands if the GNSS cannot fix.
+		 * The forced request (LTE registered) must always go through so the
+		 * time/location assist uses network data.
+		 */
+		if (!force_process && (k_uptime_get() - last_process_ms) < 60000) {
 			continue;
 		}
 		last_process_ms = k_uptime_get();
+		force_process = false;
 
-		k_sleep(K_SECONDS(2));
-
-		printk("AGNSS: processing assistance request\n");
-
-		if (pending_req.data_flags & NRF_MODEM_GNSS_AGNSS_GPS_SYS_TIME_AND_SV_TOW_REQUEST) {
-			time_inject();
-		}
-
-		if (pending_req.data_flags & NRF_MODEM_GNSS_AGNSS_POSITION_REQUEST) {
-			location_inject();
-		}
+		agnss_process();
 	}
 }
 

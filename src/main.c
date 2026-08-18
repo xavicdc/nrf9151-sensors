@@ -5,6 +5,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/printk.h>
 #include <string.h>
+#include <math.h>
 
 #include "qmp6988.h"
 #include "mqtt_app.h"
@@ -50,6 +51,42 @@ static bool led_enabled[NUM_LEDS] = { true, true, true, true };
 static struct gpio_callback button_cb[NUM_LEDS];
 static struct k_work_delayable led_work[NUM_LEDS];
 static struct k_work_delayable debounce_work[NUM_LEDS];
+
+/* Anonimització de la posició enviada a MQTT:
+ * es desplaça la coordenada amb una distància i direcció aleatòries
+ * (200-600 m) a cada enviament, de manera que la posició publicada
+ * no sigui la real i sembli mòbil.
+ */
+#define ANON_MIN_DIST_M 200.0
+#define ANON_MAX_DIST_M 600.0
+#define METERS_PER_DEG_LAT 111320.0
+#define PI 3.14159265358979323846
+
+static uint32_t anon_rng_state;
+
+static uint32_t anon_rand(void)
+{
+	/* xorshift32: senzill i suficient per desplaçar la posició. */
+	uint32_t x = anon_rng_state;
+
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+	anon_rng_state = x;
+
+	return x;
+}
+
+static void anon_offset_m(double lat, double *dlat, double *dlon)
+{
+	double dist = ANON_MIN_DIST_M +
+		      (anon_rand() % (uint32_t)(ANON_MAX_DIST_M - ANON_MIN_DIST_M + 1));
+	double angle = (anon_rand() % 628) / 100.0; /* [0, 2π) */
+	double lat_rad = lat * PI / 180.0;
+
+	*dlat = dist * cos(angle) / METERS_PER_DEG_LAT;
+	*dlon = dist * sin(angle) / (METERS_PER_DEG_LAT * cos(lat_rad));
+}
 
 static void led_toggle_work(struct k_work *work)
 {
@@ -145,6 +182,8 @@ int main(void)
 	const struct device *sht30 = DEVICE_DT_GET(SHT30_NODE);
 
 	printk("nRF9151-SMA-DK sensors + LED/button control + MQTT\n");
+
+	anon_rng_state = (uint32_t)k_uptime_get() ^ 0x9E3779B9U;
 
 	mqtt_app_init();
 	agnss_init();
@@ -268,6 +307,29 @@ int main(void)
 				printk("GPS fix: %d.%04d, %d.%04d (alt %d.%d m, acc %d m)\n",
 				       lat_deg, lat_frac, lon_deg, lon_frac,
 				       alt_int, alt_frac, (int)acc);
+
+				/* Anonimitza per a MQTT: desplaça la coordenada amb un
+				 * offset aleatori de 200-600 m perquè la posició
+				 * publicada no sigui la real i sembli mòbil.
+				 */
+				double dlat, dlon;
+				double lat_anon, lon_anon;
+
+				anon_offset_m(lat, &dlat, &dlon);
+				lat_anon = lat + dlat;
+				lon_anon = lon + dlon;
+
+				lat_deg = (int)lat_anon;
+				lat_frac = (int)((lat_anon - lat_deg) * 10000.0);
+				lon_deg = (int)lon_anon;
+				lon_frac = (int)((lon_anon - lon_deg) * 10000.0);
+
+				if (lat_frac < 0) {
+					lat_frac = -lat_frac;
+				}
+				if (lon_frac < 0) {
+					lon_frac = -lon_frac;
+				}
 
 				n = strlen(payload);
 				snprintk(payload + n, sizeof(payload) - n,
